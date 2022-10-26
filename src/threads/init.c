@@ -158,6 +158,14 @@ int pintos_init(void) {
 
             if (strcmp(cmd, "help") == 0) {
                 // print list of commands
+                printf("Below are the available commands,\n");
+                printf("whomai:\t\t Displays your name alongside your index number\n");
+                printf("shutdown:\t Pintos OS will shutdown and exit the qemu emulator\n");
+                printf("time:\t\t Display the number of seconds passed since Unix epoch\n");
+                printf("ram:\t\t Display the amount of RAM available for the OS\n");
+                printf("thread:\t\t Display thread statistics\n");
+                printf("priority:\t Display the thread priority of the current thread\n");
+                printf("exit:\t\t Exit the interactive shell\n");
 
             } else if (strcmp(cmd, "exit") == 0) {
                 break;
