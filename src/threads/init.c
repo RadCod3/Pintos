@@ -128,12 +128,67 @@ pintos_init (void)
 #endif
 
   printf ("Boot complete.\n");
+  // printf ("Welcome to pintos!\n");
   
   if (*argv != NULL) {
     /* Run actions specified on kernel command line. */
     run_actions (argv);
   } else {
     // TODO: no command line passed to kernel. Run interactively 
+    char cmd[100];
+    while (1) {
+      printf("pintos> ");
+      int i = 0;
+      char c = input_getc();
+      while (c != '\r')
+      {
+        if (c == '\b') {
+          if (i != 0) {
+            printf("\b \b");
+            i--;
+            c = input_getc();
+          }
+          continue;
+        }
+        
+        cmd[i++] = c;
+        printf("%c", c);
+        c = input_getc();
+      }
+      printf("\n");
+      cmd[i] = '\0';
+      // printf(cmd);
+      
+      
+      if (strcmp(cmd, "help") == 0) {
+        // print list of commands
+        
+      } else if (strcmp(cmd, "exit") == 0) {
+        break;
+      }
+      // whoami command
+      else if (strcmp(cmd, "whoami") == 0) {
+        printf("Radith Samarakoon - 200555H\n");
+      } else if (strcmp(cmd,"shutdown") == 0) {
+        shutdown_power_off();
+      } else if (strcmp(cmd,"time") == 0) {
+        printf("%d seconds passed since Unix epoch\n",(int) rtc_get_time());
+      } 
+      // ram command
+      else if (strcmp(cmd,"ram") == 0) {
+        printf("Total RAM: %d KB\n", init_ram_pages * PGSIZE / 1024);
+      } else if (strcmp(cmd,"reboot") == 0) {
+        shutdown_reboot();
+      } else if (strcmp(cmd,"thread") == 0) {
+        thread_print_stats();
+      } else if (strcmp(cmd, "priority") == 0) {
+        printf("Current priority: %d\n", thread_get_priority());
+      } else {
+        printf("%s: command not found.\n", cmd);
+      }
+      
+      
+    }
   }
 
   /* Finish up. */
