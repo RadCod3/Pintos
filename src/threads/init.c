@@ -143,8 +143,8 @@ int pintos_init(void) {
                     if (i != 0) {
                         printf("\b \b");
                         i--;
-                        c = input_getc();
                     }
+                    c = input_getc();
                     continue;
                 }
 
