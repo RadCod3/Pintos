@@ -188,7 +188,9 @@ int pintos_init(void) {
             } else if (strcmp(cmd, "priority") == 0) {
                 printf("Current priority: %d\n", thread_get_priority());
             } else {
-                printf("%s: command not found.\n", cmd);
+                if (strlen(cmd) != 0) {
+                    printf("%s: Invalid command. Type 'help' to see the list of available commands\n", cmd);
+                }
             }
         }
     }
