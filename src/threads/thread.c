@@ -295,9 +295,9 @@ void thread_yield(void) {
     intr_set_level(old_level);
 }
 
-bool value_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED) {
-    const struct thread *a = list_entry(a_, struct thread, elem);
-    const struct thread *b = list_entry(b_, struct thread, elem);
+bool wait_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED) {
+    const struct thread *a = list_entry(a_, struct thread, waitelem);
+    const struct thread *b = list_entry(b_, struct thread, waitelem);
 
     return a->wakeTime < b->wakeTime;
 }
@@ -319,9 +319,28 @@ void thread_sleep(int64_t waitTime) {
 
     old_level = intr_disable();
     if (cur != idle_thread)
-        list_insert_ordered(&sleep_list, &cur->elem, value_less, NULL);
+        list_insert_ordered(&sleep_list, &cur->waitelem, wait_less, NULL);
     thread_block();
     intr_set_level(old_level);
+}
+
+void thread_wakeup(int64_t start) {
+    struct list_elem *temp;
+
+    while (!list_empty(&sleep_list)) {
+        temp = list_front(&sleep_list);
+        struct thread *curr = list_entry(temp, struct thread, waitelem);
+        if (curr->wakeTime > start) {
+            break;
+        }
+        enum intr_level old_level;
+        old_level = intr_disable();
+        list_pop_front(&sleep_list);
+
+        intr_set_level(old_level);
+
+        thread_unblock(curr);
+    }
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
