@@ -173,6 +173,8 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+  int64_t start = timer_ticks();
+  thread_wakeup(start);
   
 }
 
