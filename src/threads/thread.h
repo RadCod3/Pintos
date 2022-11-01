@@ -127,6 +127,7 @@ void thread_exit(void) NO_RETURN;
 void thread_yield(void);
 
 void thread_sleep(int64_t waitTime);
+void thread_wakeup(int64_t start);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func(struct thread *t, void *aux);
@@ -139,5 +140,7 @@ int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
+
+bool wait_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
 
 #endif /* threads/thread.h */
