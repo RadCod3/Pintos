@@ -28,6 +28,9 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/* List of processes in THREAD_BLOCKED state.*/
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -89,6 +92,7 @@ void thread_init(void) {
     lock_init(&tid_lock);
     list_init(&ready_list);
     list_init(&all_list);
+    list_init(&sleep_list);
 
     /* Set up a thread structure for the running thread. */
     initial_thread = running_thread();
@@ -288,6 +292,35 @@ void thread_yield(void) {
         list_push_back(&ready_list, &cur->elem);
     cur->status = THREAD_READY;
     schedule();
+    intr_set_level(old_level);
+}
+
+bool value_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED) {
+    const struct thread *a = list_entry(a_, struct thread, elem);
+    const struct thread *b = list_entry(b_, struct thread, elem);
+
+    return a->wakeTime < b->wakeTime;
+}
+
+void thread_sleep(int64_t waitTime) {
+    /* if the current thread is not idle thread,
+  change the state of the caller thread to BLOCKED,
+  store the local tick to wake up,
+  update the global tick if necessary,
+  and call schedule() */
+    /* When you manipulate thread list, disable interrupt! */
+
+    struct thread *cur = thread_current();
+    cur->wakeTime = waitTime;
+
+    enum intr_level old_level;
+
+    ASSERT(!intr_context());
+
+    old_level = intr_disable();
+    if (cur != idle_thread)
+        list_insert_ordered(&sleep_list, &cur->elem, value_less, NULL);
+    thread_block();
     intr_set_level(old_level);
 }
 
