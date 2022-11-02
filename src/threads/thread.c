@@ -295,6 +295,8 @@ void thread_yield(void) {
     intr_set_level(old_level);
 }
 
+/* Function used to compare threads by their waketime.
+    It is of the type list_less_func(). */
 bool wait_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED) {
     const struct thread *a = list_entry(a_, struct thread, waitelem);
     const struct thread *b = list_entry(b_, struct thread, waitelem);
