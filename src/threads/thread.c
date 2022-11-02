@@ -304,6 +304,15 @@ bool wait_less(const struct list_elem *a_, const struct list_elem *b_, void *aux
     return a->wakeTime < b->wakeTime;
 }
 
+/* Function used to compare threads by their priority.
+    It is of the type list_less_func(). */
+bool priority_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED) {
+    const struct thread *a = list_entry(a_, struct thread, elem);
+    const struct thread *b = list_entry(b_, struct thread, elem);
+
+    return a->priority > b->priority;
+}
+
 void thread_sleep(int64_t waitTime) {
     /* if the current thread is not idle thread,
   change the state of the caller thread to BLOCKED,
