@@ -336,3 +336,10 @@ cond_broadcast (struct condition *cond, struct lock *lock)
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
 }
+
+bool priority_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  struct thread *thread_a = list_entry (a, struct thread, waiterElem);
+  struct thread *thread_b = list_entry (b, struct thread, waiterElem);
+  return thread_a->priority < thread_b->priority;
+}
