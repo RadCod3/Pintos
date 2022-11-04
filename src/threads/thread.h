@@ -141,6 +141,9 @@ void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
+void list_print(struct list *list);
+
 bool wait_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
+bool priority_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
 
 #endif /* threads/thread.h */
