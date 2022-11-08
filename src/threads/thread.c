@@ -619,11 +619,14 @@ allocate_tid(void) {
     return tid;
 }
 
+/* if current threads priority is less than the priority of the thread
+   at the back of the ready list, yield the cpu to the thread at the
+   back of the ready list */
 void thread_preempt(void) {
     enum intr_level old_level = intr_disable();
     if (!list_empty(&ready_list)) {
         struct thread *cur = thread_current();
-        struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
+        struct thread *next = list_entry(list_back(&ready_list), struct thread, elem);
         if (cur->priority < next->priority) {
             thread_yield();
         }
