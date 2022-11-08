@@ -194,12 +194,9 @@ tid_t thread_create(const char *name, int priority,
     /* Add to run queue. */
     thread_unblock(t);
     // list_print(&ready_list);
-    int a = thread_get_priority();
-    if (a < t->priority) {
-        thread_yield();
-    }
+    thread_preempt();
     // list_print(&ready_list);
-    struct thread *curr = thread_current();
+    // struct thread *curr = thread_current();
     // struct list_elem *back_el = list_back(&ready_list);
     // struct thread *last = list_entry(back_el, struct thread, elem);
     return tid;
@@ -323,8 +320,8 @@ void thread_yield(void) {
 /* Function used to compare threads by their waketime.
     It is of the type list_less_func(). */
 bool wait_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED) {
-    const struct thread *a = list_entry(a_, struct thread, waitelem);
-    const struct thread *b = list_entry(b_, struct thread, waitelem);
+    const struct thread *a = list_entry(a_, struct thread, sleepElem);
+    const struct thread *b = list_entry(b_, struct thread, sleepElem);
 
     return a->wakeTime < b->wakeTime;
 }
@@ -355,7 +352,7 @@ void thread_sleep(int64_t waitTime) {
 
     old_level = intr_disable();
     if (cur != idle_thread)
-        list_insert_ordered(&sleep_list, &cur->waitelem, wait_less, NULL);
+        list_insert_ordered(&sleep_list, &cur->sleepElem, wait_less, NULL);
     thread_block();
     intr_set_level(old_level);
 }
@@ -365,7 +362,7 @@ void thread_wakeup(int64_t start) {
 
     while (!list_empty(&sleep_list)) {
         temp = list_front(&sleep_list);
-        struct thread *curr = list_entry(temp, struct thread, waitelem);
+        struct thread *curr = list_entry(temp, struct thread, sleepElem);
         if (curr->wakeTime > start) {
             break;
         }
@@ -397,12 +394,7 @@ void thread_foreach(thread_action_func *func, void *aux) {
 void thread_set_priority(int new_priority) {
     thread_current()->priority = new_priority;
     list_sort(&ready_list, (list_less_func *)&priority_less, NULL);
-    if (!list_empty(&ready_list)) {
-        struct thread *last = list_entry(list_back(&ready_list), struct thread, elem);
-        if (last->priority > new_priority) {
-            thread_yield();
-        }
-    }
+    thread_preempt();
 }
 
 /* Returns the current thread's priority. */
@@ -625,6 +617,18 @@ allocate_tid(void) {
     lock_release(&tid_lock);
 
     return tid;
+}
+
+void thread_preempt(void) {
+    enum intr_level old_level = intr_disable();
+    if (!list_empty(&ready_list)) {
+        struct thread *cur = thread_current();
+        struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
+        if (cur->priority < next->priority) {
+            thread_yield();
+        }
+    }
+    intr_set_level(old_level);
 }
 
 /* Offset of `stack' member within `struct thread'.
