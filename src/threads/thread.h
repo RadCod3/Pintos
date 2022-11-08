@@ -87,8 +87,8 @@ struct thread {
     uint8_t *stack;            /* Saved stack pointer. */
     int priority;              /* Priority. */
     int64_t wakeTime;
-    struct list_elem allelem;  /* List element for all threads list. */
-    struct list_elem waitelem; /* List element for */
+    struct list_elem allelem;   /* List element for all threads list. */
+    struct list_elem sleepElem; /* List element for sleep list */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem; /* List element. */
@@ -145,5 +145,7 @@ void list_print(struct list *list);
 
 bool wait_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
 bool priority_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
+
+void thread_preempt(void);
 
 #endif /* threads/thread.h */
