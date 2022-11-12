@@ -1,6 +1,7 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -100,6 +101,11 @@ struct thread {
 
     /* Owned by thread.c. */
     unsigned magic; /* Detects stack overflow. */
+
+    struct lock *waitingLock;
+    struct list donationList;
+    struct list_elem donationListElem;
+    int tempPriority;
 };
 
 /* If false (default), use round-robin scheduler.
@@ -145,6 +151,11 @@ void list_print(struct list *list);
 
 bool wait_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
 bool priority_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
+bool don_priority_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED);
+
+void thread_update_priority(void);
+void thread_donate_priority(void);
+void thread_remove_lock(struct lock *l);
 
 void thread_preempt(void);
 

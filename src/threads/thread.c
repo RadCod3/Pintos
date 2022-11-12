@@ -229,7 +229,7 @@ void thread_block(void) {
     thread_current()->status = THREAD_BLOCKED;
     schedule();
 }
-
+//  UNBLOCK
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -335,6 +335,46 @@ bool priority_less(const struct list_elem *a_, const struct list_elem *b_, void 
     return a->priority < b->priority;
 }
 
+/* Function used to compare threads by their priority but for donation list.
+    It is of the type list_less_func(). */
+bool don_priority_less(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED) {
+    const struct thread *a = list_entry(a_, struct thread, donationListElem);
+    const struct thread *b = list_entry(b_, struct thread, donationListElem);
+    // >= or > ???
+    return a->priority < b->priority;
+}
+
+/*Function used to update the priority of the current thread after releasing a certain lock.
+The new priority of the current thread will be equal to the highest priority out of threads presently in the
+donation list of the current thread.*/
+void thread_update_priority(void) {
+    struct thread *curr = thread_current();
+    curr->priority = curr->tempPriority;
+
+    if (!list_empty(&curr->donationList)) {
+        struct thread *back = list_entry(list_back(&curr->donationList), struct thread, donationListElem);
+
+        // if current threads priority is less than the highest priority in the donation list,
+        if (curr->priority < back->priority) {
+            curr->priority = back->priority;
+        }
+    }
+}
+
+/* Function used to remove threads waiting for a given lock from the donation list of the current thread.*/
+void thread_remove_lock(struct lock *l) {
+    struct list_elem *e;
+    struct thread *t;
+    struct list *donationList = &thread_current()->donationList;
+    for (e = list_begin(&thread_current()->donationList); e != list_end(&thread_current()->donationList); e = list_next(e)) {
+        t = list_entry(e, struct thread, donationListElem);
+        /* A thread can own multiple locks, so we need to check if the lock is the same and only remove
+         threads that are waiting for the same lock.*/
+        if (t->waitingLock == l) {
+            list_remove(e);
+        }
+    }
+}
 void thread_sleep(int64_t waitTime) {
     /* if the current thread is not idle thread,
   change the state of the caller thread to BLOCKED,
@@ -392,11 +432,39 @@ void thread_foreach(thread_action_func *func, void *aux) {
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority) {
-    thread_current()->priority = new_priority;
-    list_sort(&ready_list, (list_less_func *)&priority_less, NULL);
-    thread_preempt();
+    if (!thread_mlfqs) {
+        enum intr_level old_level;
+        old_level = intr_disable();
+
+        int old_priority = thread_current()->priority;
+
+        thread_current()->tempPriority = new_priority;
+        thread_update_priority();
+
+        if (old_priority < thread_current()->priority) {
+            thread_donate_priority();
+        }
+
+        list_sort(&ready_list, (list_less_func *)&priority_less, NULL);
+
+        thread_preempt();
+        intr_set_level(old_level);
+    }
 }
 
+void thread_donate_priority() {
+    // the lock that the current thread is waiting for
+    struct lock *l = thread_current()->waitingLock;
+
+    while (l && l->holder) {
+        /*This gives the priority of current thread to a thread of lower priority that holds a lock
+        required by the current thread. Then checks the same thing for the thread which is holding the required lock.*/
+        if (l->holder->priority < thread_current()->priority) {
+            l->holder->priority = thread_current()->priority;
+            l = l->holder->waitingLock;
+        }
+    }
+}
 /* Returns the current thread's priority. */
 int thread_get_priority(void) {
     return thread_current()->priority;
@@ -509,7 +577,9 @@ init_thread(struct thread *t, const char *name, int priority) {
     strlcpy(t->name, name, sizeof t->name);
     t->stack = (uint8_t *)t + PGSIZE;
     t->priority = priority;
+    t->tempPriority = priority;
     t->magic = THREAD_MAGIC;
+    list_init(&t->donationList);
 
     old_level = intr_disable();
     list_push_back(&all_list, &t->allelem);
