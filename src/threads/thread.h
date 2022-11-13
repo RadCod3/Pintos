@@ -1,6 +1,7 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "lib/float.h"
 #include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
@@ -106,6 +107,9 @@ struct thread {
     struct list donationList;
     struct list_elem donationListElem;
     int tempPriority;
+
+    int nice;
+    float_t recent_cpu;
 };
 
 /* If false (default), use round-robin scheduler.
@@ -158,5 +162,9 @@ void thread_donate_priority(void);
 void thread_remove_lock(struct lock *l);
 
 void thread_preempt(void);
+
+void thread_calculate_recent_cpu_for_all();
+void thread_calculate_recent_cpu();
+void thread_calculate_load_avg(void);
 
 #endif /* threads/thread.h */

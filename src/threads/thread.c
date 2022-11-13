@@ -61,6 +61,8 @@ static unsigned thread_ticks; /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 
+float_t load_avg;
+
 static void kernel_thread(thread_func *, void *aux);
 
 static void idle(void *aux UNUSED);
@@ -93,6 +95,8 @@ void thread_init(void) {
     list_init(&ready_list);
     list_init(&all_list);
     list_init(&sleep_list);
+
+    load_avg = float_from_int(0);
 
     /* Set up a thread structure for the running thread. */
     initial_thread = running_thread();
@@ -477,22 +481,68 @@ void thread_set_nice(int nice UNUSED) {
 
 /* Returns the current thread's nice value. */
 int thread_get_nice(void) {
-    /* Not yet implemented. */
-    return 0;
+    return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int thread_get_load_avg(void) {
-    /* Not yet implemented. */
-    return 0;
+    int value = float_round(float_mul_int(load_avg, 100));
+    return value;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int thread_get_recent_cpu(void) {
-    /* Not yet implemented. */
-    return 0;
+    int value = float_round(float_mul_int(thread_current()->recent_cpu, 100));
+    return value;
 }
 
+void thread_calculate_load_avg(void) {
+    int ready_threads = list_size(&ready_list);
+    if (thread_current() != idle_thread) {
+        ready_threads++;
+    }
+    float_t a = float_mul(int_div(59, 60), load_avg);
+    float_t b = float_mul_int(int_div(1, 60), ready_threads);
+    load_avg = float_add(a, b);
+}
+// recent_cpu = (2*load_avg)/(2*load_avg + 1) * recent_cpu + nice
+void thread_calculate_recent_cpu(struct thread *t) {
+    ASSERT(is_thread(t));
+
+    if (t != idle_thread) {
+        float_t load = float_mul_int(load_avg, 2);
+        t->recent_cpu = float_add_int(float_mul(float_div(float_mul_int(load_avg, 2), float_add_int(float_mul_int(load_avg, 2), 1)), thread_current()->recent_cpu), thread_current()->nice);
+    }
+}
+void thread_calculate_recent_cpu_for_all() {
+    struct list_elem *e = list_begin(&all_list);
+    struct thread *t;
+    while (e != list_end(&all_list)) {
+        t = list_entry(e, struct thread, allelem);
+        thread_calculate_recent_cpu(t);
+        e = list_next(e);
+    }
+}
+void thread_calculate_priority(struct thread *t) {
+    ASSERT(is_thread(t));
+    t->priority = PRI_MAX - float_round(float_div_int(t->recent_cpu, 4)) - t->nice * 2;
+    if (t->priority > PRI_MAX) {
+        t->priority = PRI_MAX;
+    }
+    if (t->priority < PRI_MIN) {
+        t->priority = PRI_MIN;
+    }
+}
+
+void thread_calculate_priority_for_all() {
+    struct list_elem *e = list_begin(&all_list);
+    struct thread *t;
+    while (e != list_end(&all_list)) {
+        t = list_entry(e, struct thread, allelem);
+        thread_calculate_priority(t);
+        e = list_next(e);
+    }
+}
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -502,8 +552,7 @@ int thread_get_recent_cpu(void) {
    blocks.  After that, the idle thread never appears in the
    ready list.  It is returned by next_thread_to_run() as a
    special case when the ready list is empty. */
-static void
-idle(void *idle_started_ UNUSED) {
+static void idle(void *idle_started_ UNUSED) {
     struct semaphore *idle_started = idle_started_;
     idle_thread = thread_current();
     sema_up(idle_started);
@@ -580,7 +629,8 @@ init_thread(struct thread *t, const char *name, int priority) {
     t->tempPriority = priority;
     t->magic = THREAD_MAGIC;
     list_init(&t->donationList);
-
+    t->nice = 0;
+    t->recent_cpu = float_from_int(0);
     old_level = intr_disable();
     list_push_back(&all_list, &t->allelem);
     intr_set_level(old_level);
