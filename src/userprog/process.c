@@ -39,12 +39,16 @@ tid_t process_execute(const char *file_name) {
 
     /*Code to get the first token from file name. This will get the program name.*/
     char *tokenizer_ptr;
-    char *token_first = strtok_r(file_name, " ", &tokenizer_ptr);
-
+    // printf("file_name is: %s\n", file_name);
+    char *name = malloc(strlen(file_name) + 1);
+    strlcpy(name, file_name, strlen(file_name) + 1);
+    char *token_first = strtok_r(name, " ", &tokenizer_ptr);
+    // printf("token_first is: %s\n", token_first);
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(token_first, PRI_DEFAULT, start_process, fn_copy);
     // printf("Current thread tid is: %d\n", thread_current()->tid);
     // printf("tid: %d\n", tid);
+    free(name);
     if (tid == TID_ERROR)
         palloc_free_page(fn_copy);
     return tid;
@@ -76,8 +80,12 @@ start_process(void *file_name_) {
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
     success = load(file_name, &if_.eip, &if_.esp);
+    // printf("success: %d\n", success);
 
-    args_to_stack(argCount, &args, &if_.esp);
+    if (success) {
+        args_to_stack(argCount, &args, &if_.esp);
+    }
+    // printf("after args\n");
     // hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
 
     // TODO CHANGE COMMENTS
@@ -92,8 +100,9 @@ start_process(void *file_name_) {
 
     /* If load failed, quit. */
     palloc_free_page(file_name);
-    if (!success)
+    if (!success) {
         thread_exit();
+    }
 
     /* Start the user process by simulating a return from an
        interrupt, implemented by intr_exit (in
@@ -203,7 +212,7 @@ void process_exit(void) {
         }
     }
 
-    // free all the child threads.
+    // Free all the child threads.
     // Since this process exits the child processes are no longer required
     struct list *child_list = &cur->child_list;
     struct list_elem *e = list_begin(child_list);
@@ -221,9 +230,6 @@ void process_exit(void) {
 
     cur->parent = NULL;
 
-    if (cur->executable != NULL) {
-        file_allow_write(cur->executable);
-    }
     file_close(cur->executable);
 
     // free all files in current thread
@@ -429,6 +435,7 @@ bool load(const char *file_name, void (**eip)(void), void **esp) {
 
 done:
     /* We arrive here whether the load is successful or not. */
+    // printf("success in load function %d\n", success);
     if (success) {
         file_deny_write(file);
         t->executable = file;

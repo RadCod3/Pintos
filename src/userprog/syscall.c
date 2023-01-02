@@ -29,11 +29,11 @@ static void
 syscall_handler(struct intr_frame *f UNUSED) {
 
     int syscall_number;
-    // printf("system call number: %d \n", syscall_number);
 
     if (!read_memory(f->esp, &syscall_number, sizeof(syscall_number))) {
         exit(-1);
     }
+    // printf("system call number: %d \n", syscall_number);
     //
     switch (syscall_number) {
     case SYS_EXIT: {
@@ -154,7 +154,7 @@ syscall_handler(struct intr_frame *f UNUSED) {
         break;
     }
     default: {
-        printf("Unimplemented system call!\n");
+        // printf("Unimplemented system call!\n");
         // exit(-1);
         break;
     }
@@ -166,6 +166,10 @@ static int read_memory(void *addr, void *buffer, unsigned size) {
     unsigned i;
     int result = 1;
     for (i = 0; i < size; i++) {
+        if (!is_user_vaddr(addr + i)) {
+            result = 0;
+            break;
+        }
         int byte = get_user(addr + i);
         if (byte == -1) {
             result = 0;
@@ -213,6 +217,7 @@ pid_t exec(const char *cmd_line) {
     struct thread *parent = thread_current();
     tid_t pid = -1;
     // create child process to execute cmd
+    // printf("came here\n");
     pid = process_execute(cmd_line);
 
     // get the created child
@@ -275,7 +280,7 @@ int open(const char *file) {
 
 /*Creates a new file called file initially initial_size bytes in size. Returns true if successful, false otherwise */
 bool create(const char *file, unsigned initial_size) {
-    if (!file || get_user(file) == -1) {
+    if (!file || !is_user_vaddr(file) || get_user(file) == -1) {
         exit(-1);
     }
 
@@ -305,7 +310,7 @@ Otherwise, lines of text output by different processes may end up interleaved on
 int write(int fd, const void *buffer, unsigned size) {
 
     // to check if the addresses are valid and in user space
-    if (fd < 0 || get_user(buffer) == -1 || get_user(buffer + size) == -1) {
+    if (fd < 0 || !is_user_vaddr(buffer) || get_user(buffer) == -1 || !is_user_vaddr(buffer + size) || get_user(buffer + size) == -1) {
         exit(-1);
         // return -1;
     }
@@ -382,7 +387,7 @@ int read(int fd, void *buffer, unsigned size) {
 
     struct file_descriptor *fd_obj = getfdObject(fd);
     // if invalid address or fd is not found
-    if (fd_obj == NULL || buffer == NULL || buffer > PHYS_BASE || get_user(buffer) == -1 || get_user(buffer + size) == -1) {
+    if (fd_obj == NULL || buffer == NULL || !is_user_vaddr(buffer) || get_user(buffer) == -1 || !is_user_vaddr(buffer + size) || get_user(buffer + size) == -1) {
 
         exit(-1);
         return -1;
@@ -451,6 +456,7 @@ struct child_wrapper *getChildData(tid_t tid, struct list *thread_list) {
             return c;
         }
     }
+    // exit(-1);
     return NULL;
 }
 // get the file_descriptor from fd_list in current thread.
