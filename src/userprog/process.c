@@ -10,6 +10,7 @@
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -42,6 +43,8 @@ tid_t process_execute(const char *file_name) {
 
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(token_first, PRI_DEFAULT, start_process, fn_copy);
+    // printf("Current thread tid is: %d\n", thread_current()->tid);
+    // printf("tid: %d\n", tid);
     if (tid == TID_ERROR)
         palloc_free_page(fn_copy);
     return tid;
@@ -76,6 +79,16 @@ start_process(void *file_name_) {
 
     args_to_stack(argCount, &args, &if_.esp);
     // hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+
+    // TODO CHANGE COMMENTS
+    if (thread_current()->parent != NULL) {
+        // get this thread as a child
+        struct child_wrapper *child = getChildData(thread_current()->tid, &thread_current()->parent->child_list);
+        // setting the load status
+        child->loaded = success;
+    }
+    // wake up my parent which wait me to load successfully
+    sema_up(&thread_current()->sema_exec);
 
     /* If load failed, quit. */
     palloc_free_page(file_name);
@@ -146,20 +159,87 @@ void args_to_stack(int argCount, char **line, void **esp) {
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-
+/*
 int process_wait(tid_t child_tid UNUSED) {
     for (int i = 0; i < 500000000; i++) {
     }
     return 0;
+}
+*/
+
+int process_wait(tid_t tid) {
+    struct child_wrapper *childData = getChildData(tid, &thread_current()->child_list);
+
+    // we cannot call wait on the same thread more than once
+    if (childData != NULL && !childData->called_before) {
+        childData->called_before = true;
+
+        // the current thread needs to wait till this child completes
+        // printf("Waiting\n");
+        // printf("Child status: %d\n", childData->status);
+        if (childData->status == THREAD_ALIVE) {
+            // printf("Waiting for child to complete\n");
+            sema_down(&(childData->child_thread->sema_wait));
+        }
+        // printf("Done waiting\n");
+        // after the current thread is done waiting
+        return childData->exit_status;
+    }
+    return -1;
 }
 
 /* Free the current process's resources. */
 void process_exit(void) {
     struct thread *cur = thread_current();
     uint32_t *pd;
+    // printf("current thread tid: %d\n", cur->tid);
+    // If current thread has a parent we need to set an exit status
+    if (cur->parent != NULL) {
+        struct child_wrapper *c = getChildData(cur->tid, &cur->parent->child_list);
+        ASSERT(c != NULL);
+        if (c->status == THREAD_ALIVE) {
+            c->status = THREAD_KILLED;
+            c->exit_status = -1;
+        }
+    }
+
+    // free all the child threads.
+    // Since this process exits the child processes are no longer required
+    struct list *child_list = &cur->child_list;
+    struct list_elem *e = list_begin(child_list);
+    while (e != list_end(child_list)) {
+        struct list_elem *next = list_next(e);
+        struct child_wrapper *c = list_entry(e, struct child_wrapper, child_elem);
+        list_remove(e);
+        free(c);
+        e = next;
+    }
+
+    // awake parent
+    // printf("awake parent");
+    sema_up(&cur->sema_wait);
+
+    cur->parent = NULL;
+
+    if (cur->executable != NULL) {
+        file_allow_write(cur->executable);
+    }
+    file_close(cur->executable);
+
+    // free all files in current thread
+    struct list *fd_list = &cur->fd_list;
+    struct list_elem *el;
+    while (!list_empty(fd_list)) {
+        el = list_pop_front(fd_list);
+        struct file_descriptor *fd_elem = list_entry(el, struct file_descriptor, elem);
+        file_close(fd_elem->file);
+        list_remove(el);
+        free(fd_elem);
+    }
+    // printf("came here\n");
 
     /* Destroy the current process's page directory and switch back
-       to the kernel-only page directory. */
+    to the kernel-only page directory. */
     pd = cur->pagedir;
     if (pd != NULL) {
         /* Correct ordering here is crucial.  We must set
@@ -349,7 +429,11 @@ bool load(const char *file_name, void (**eip)(void), void **esp) {
 
 done:
     /* We arrive here whether the load is successful or not. */
-    file_close(file);
+    if (success) {
+        file_deny_write(file);
+        t->executable = file;
+    } else
+        file_close(file);
     return success;
 }
 

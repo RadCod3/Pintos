@@ -14,6 +14,12 @@ enum thread_status {
     THREAD_DYING    /* About to be destroyed. */
 };
 
+// For child_status
+#define THREAD_ALIVE 2
+#define THREAD_KILLED 0
+#define THREAD_EXITED 1
+#define INITIAL_EXIT_STATUS -500
+
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -102,6 +108,10 @@ struct thread {
 
     /*Semaphore to provide wait functionality to the thread*/
     struct semaphore sema_wait;
+    struct semaphore sema_exec;
+
+    /*attributes related to file*/
+    struct file *executable; /*pointer to the executable file*/
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -118,7 +128,11 @@ wrapper class for a child thread to access and store important data easily
 struct child_wrapper {
     struct list_elem child_elem; /*list elem used to add in child_list */
     struct thread *child_thread; /*pointer to the real child thread*/
+    tid_t process_id;            /*Parent id of child. Easier than getting child->child_thread->parent->tid*/
     bool called_before;          /*to check if wait() is called before?*/
+    int status;                  /*Alive Killed or EXITED*/
+    int exit_status;             /*To check how the process completed*/
+    bool loaded;                 /*To check if the process loaded successfully*/
 };
 
 /* If false (default), use round-robin scheduler.

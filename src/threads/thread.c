@@ -70,6 +70,7 @@ static void schedule(void);
 void thread_schedule_tail(struct thread *prev);
 static tid_t allocate_tid(void);
 
+struct child_wrapper *create_new_child(struct thread *t);
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -95,6 +96,9 @@ void thread_init(void) {
     init_thread(initial_thread, "main", PRI_DEFAULT);
     initial_thread->status = THREAD_RUNNING;
     initial_thread->tid = allocate_tid();
+
+    /*Set parent to null since no parent exists for the initial thread*/
+    initial_thread->parent = NULL;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -172,8 +176,12 @@ tid_t thread_create(const char *name, int priority,
     init_thread(t, name, priority);
     tid = t->tid = allocate_tid();
 
+    /*NEWLY ADDED*/
     /*Create parent child connection between old and new threads*/
-    // struct child_wrapper
+    struct child_wrapper *c = create_new_child(t);
+    t->parent = thread_current();
+    list_push_back(&thread_current()->child_list, &c->child_elem);
+
     /* Stack frame for kernel_thread(). */
     kf = alloc_frame(t, sizeof *kf);
     kf->eip = NULL;
@@ -199,6 +207,11 @@ struct child_wrapper *create_new_child(struct thread *t) {
     struct child_wrapper *c = malloc(sizeof(struct child_wrapper));
     c->called_before = false;
     c->child_thread = t;
+    c->process_id = t->tid;
+    c->status = THREAD_ALIVE;
+    c->loaded = false;
+    c->exit_status = INITIAL_EXIT_STATUS;
+    return c;
 }
 
 /* Puts the current thread to sleep.  It will not be scheduled
@@ -434,7 +447,15 @@ init_thread(struct thread *t, const char *name, int priority) {
     // initialize the list of file descriptors, and the count. Count 1 and 0 are reserved for stdout and stdin
     list_init(&t->fd_list);
     t->fd_count = 1;
+    t->executable = NULL;
 
+    // initialize list of child threads
+    list_init(&t->child_list);
+
+    // initialize semaphore for waiting. Initialized to zero
+    sema_init(&t->sema_wait, 0);
+    sema_init(&t->sema_exec, 0);
+    t->parent = NULL;
     t->magic = THREAD_MAGIC;
 
     old_level = intr_disable();

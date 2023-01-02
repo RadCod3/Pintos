@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 
@@ -14,8 +15,10 @@ static void syscall_handler(struct intr_frame *);
 static int get_user(const uint8_t *uaddr);
 static int read_memory(void *addr, void *buffer, unsigned size);
 bool create(const char *file, unsigned initial_size);
+unsigned tell(int fd);
 static bool put_user(uint8_t *udst, uint8_t byte);
 struct file_descriptor *getfdObject(int fd);
+struct child_wrapper *getChildData(tid_t tid, struct list *thread_list);
 
 void syscall_init(void) {
     lock_init(&f_lock);
@@ -26,11 +29,11 @@ static void
 syscall_handler(struct intr_frame *f UNUSED) {
 
     int syscall_number;
+    // printf("system call number: %d \n", syscall_number);
 
     if (!read_memory(f->esp, &syscall_number, sizeof(syscall_number))) {
         exit(-1);
     }
-    // printf("system call number: %d \t", syscall_number);
     //
     switch (syscall_number) {
     case SYS_EXIT: {
@@ -68,6 +71,66 @@ syscall_handler(struct intr_frame *f UNUSED) {
             exit(-1);
         }
         f->eax = open(file);
+        break;
+    }
+    case SYS_EXEC: {
+        const char *cmd_line;
+        if (!read_memory(f->esp + 4, &cmd_line, sizeof(cmd_line))) {
+            exit(-1);
+        }
+        f->eax = exec(cmd_line);
+        break;
+    }
+    case SYS_TELL: {
+        int fd;
+        if (!read_memory(f->esp + 4, &fd, sizeof(fd))) {
+            exit(-1);
+        }
+        f->eax = tell(fd);
+        break;
+    }
+    case SYS_SEEK: {
+        int fd;
+        unsigned position;
+        if (!read_memory(f->esp + 4, &fd, sizeof(fd))) {
+            exit(-1);
+        }
+        if (!read_memory(f->esp + 8, &position, sizeof(position))) {
+            exit(-1);
+        }
+        seek(fd, position);
+        break;
+    }
+    case SYS_READ: {
+        int fd;
+        void *buffer;
+        unsigned size;
+        if (!read_memory(f->esp + 4, &fd, sizeof(fd))) {
+            exit(-1);
+        }
+        if (!read_memory(f->esp + 8, &buffer, sizeof(buffer))) {
+            exit(-1);
+        }
+        if (!read_memory(f->esp + 12, &size, sizeof(size))) {
+            exit(-1);
+        }
+        f->eax = read(fd, buffer, size);
+        break;
+    }
+    case SYS_CLOSE: {
+        int fd;
+        if (!read_memory(f->esp + 4, &fd, sizeof(fd))) {
+            exit(-1);
+        }
+        close(fd);
+        break;
+    }
+    case SYS_WAIT: {
+        tid_t tid;
+        if (!read_memory(f->esp + 4, &tid, sizeof(tid))) {
+            exit(-1);
+        }
+        f->eax = wait(tid);
         break;
     }
     case SYS_FILESIZE: {
@@ -124,7 +187,19 @@ void halt(void) {
 // Conventionally, a status of 0 indicates success and nonzero values indicate errors.
 void exit(int status) {
     struct thread *cur = thread_current();
+    // printf("SYS_EXIT was called\n");
     printf("%s: exit(%d)\n", cur->name, status);
+
+    struct child_wrapper *c = getChildData(cur->tid, &cur->parent->child_list);
+
+    c->exit_status = status;
+    // mark current status of the thread.Thread maybe exitting due to completion or being killed.
+    if (status == -1) {
+        c->status = THREAD_KILLED;
+    } else {
+        c->status = THREAD_EXITED;
+    }
+
     thread_exit();
 }
 
@@ -135,18 +210,21 @@ Thus, the parent process cannot return from the exec until it knows whether the 
 You must use appropriate synchronization to ensure this.
 */
 pid_t exec(const char *cmd_line) {
-    tid_t pid_child = -1;
-    int i = 0;
-    int length = sizeof(cmd_line);
-    while (i < length) {
-        if (get_user(cmd_line + i) == -1) {
-            exit(-1);
-        }
-        i++;
-    }
+    struct thread *parent = thread_current();
+    tid_t pid = -1;
+    // create child process to execute cmd
+    pid = process_execute(cmd_line);
 
-    pid_child = process_execute(cmd_line);
-    return pid_child;
+    // get the created child
+    struct child_wrapper *childWrap = getChildData(pid, &parent->child_list);
+    // wait this child until load
+    sema_down(&childWrap->child_thread->sema_exec);
+    // after wake up check if child load successfully
+    if (!childWrap->loaded) {
+        // failed to load
+        return -1;
+    }
+    return pid;
 }
 
 /*
@@ -195,20 +273,14 @@ int open(const char *file) {
     return -1;
 }
 
+/*Creates a new file called file initially initial_size bytes in size. Returns true if successful, false otherwise */
 bool create(const char *file, unsigned initial_size) {
     if (!file || get_user(file) == -1) {
         exit(-1);
     }
 
-    // printf("file: %d,\ninitial_size: %d\n", initial_size);
-    //
     lock_acquire(&f_lock);
-    // printf("Before file creation\n");
     bool result = filesys_create(file, initial_size);
-    // printf("After file creation\n");
-    // if (result == false) {
-    //     printf("File creation failed\n");
-    // }
 
     lock_release(&f_lock);
     return result;
@@ -254,6 +326,7 @@ int write(int fd, const void *buffer, unsigned size) {
     struct file_descriptor *fd_obj = getfdObject(fd);
 
     if (fd_obj == NULL) {
+        lock_release(&f_lock);
         return -1;
     }
     struct file *fd_file = fd_obj->file;
@@ -263,9 +336,85 @@ int write(int fd, const void *buffer, unsigned size) {
     return actual_byte_count;
 }
 
-int filesize(int fd) {
+/*Returns the position of the next byte to be read or written in open file fd,
+expressed in bytes from the beginning of the file. */
+unsigned tell(int fd) {
+    struct file_descriptor *fd_obj = getfdObject(fd);
+    if (fd_obj == NULL) {
+        return -1;
+    }
     lock_acquire(&f_lock);
-    int size = file_length(fd);
+    struct file *fd_file = fd_obj->file;
+    unsigned position = file_tell(fd_file);
+    lock_release(&f_lock);
+    return position;
+}
+
+/*Changes the next byte to be read or written in open file fd to position, expressed
+in bytes from the beginning of the file.*/
+void seek(int fd, unsigned position) {
+    struct file_descriptor *fd_obj = getfdObject(fd);
+    if (fd_obj == NULL) {
+        return;
+    }
+    lock_acquire(&f_lock);
+    struct file *fd_file = fd_obj->file;
+    file_seek(fd_file, position);
+    lock_release(&f_lock);
+}
+/*Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually
+read (0 at end of file), or -1 if the file could not be read (due to a condition other than end of file). */
+int read(int fd, void *buffer, unsigned size) {
+
+    if (fd < 0) {
+        exit(-1);
+        return -1;
+    }
+
+    if (fd == STDIN_FILENO) {
+        unsigned i = 0;
+        while (i < size) {
+            *(uint8_t *)(buffer + i) = input_getc();
+            i++;
+        }
+        return 0;
+    }
+
+    struct file_descriptor *fd_obj = getfdObject(fd);
+    // if invalid address or fd is not found
+    if (fd_obj == NULL || buffer == NULL || buffer > PHYS_BASE || get_user(buffer) == -1 || get_user(buffer + size) == -1) {
+
+        exit(-1);
+        return -1;
+    }
+    lock_acquire(&f_lock);
+    struct file *fd_file = fd_obj->file;
+    int actual_byte_count = (int)file_read(fd_file, buffer, size);
+    lock_release(&f_lock);
+    return actual_byte_count;
+}
+
+/* Closes file descriptor fd. */
+void close(int fd) {
+    lock_acquire(&f_lock);
+    struct file_descriptor *fd_obj = getfdObject(fd);
+    if (fd_obj == NULL) {
+        lock_release(&f_lock);
+        return;
+    }
+    struct file *fd_file = fd_obj->file;
+    file_close(fd_file);
+    // removing the file descriptor object from the open files list
+    list_remove(&fd_obj->elem);
+    // freeing the memory allocated to the file descriptor object
+    free(fd_obj);
+    lock_release(&f_lock);
+}
+/* Returns the size, in bytes, of the file open as fd. */
+int filesize(int fd) {
+    struct file_descriptor *fd_obj = getfdObject(fd);
+    lock_acquire(&f_lock);
+    int size = file_length(fd_obj->file);
     lock_release(&f_lock);
     return size;
 }
@@ -293,7 +442,17 @@ put_user(uint8_t *udst, uint8_t byte) {
         : "q"(byte));
     return error_code != -1;
 }
-
+// search a given list and find a thread with given tid
+struct child_wrapper *getChildData(tid_t tid, struct list *thread_list) {
+    struct list_elem *e;
+    for (e = list_begin(thread_list); e != list_end(thread_list); e = list_next(e)) {
+        struct child_wrapper *c = list_entry(e, struct child_wrapper, child_elem);
+        if (c->process_id == tid) {
+            return c;
+        }
+    }
+    return NULL;
+}
 // get the file_descriptor from fd_list in current thread.
 struct file_descriptor *getfdObject(int fd) {
     struct list_elem *element;

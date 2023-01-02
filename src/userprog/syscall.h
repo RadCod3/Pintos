@@ -1,3 +1,4 @@
+#include "threads/thread.h"
 #include <list.h>
 #ifndef USERPROG_SYSCALL_H
 #define USERPROG_SYSCALL_H
@@ -12,5 +13,6 @@ struct file_descriptor {
     struct file *file;
     struct list_elem elem;
 };
+struct child_wrapper *getChildData(tid_t tid, struct list *thread_list);
 
 #endif /* userprog/syscall.h */
