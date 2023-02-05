@@ -44,10 +44,14 @@ tid_t process_execute(const char *file_name) {
     strlcpy(name, file_name, strlen(file_name) + 1);
     char *token_first = strtok_r(name, " ", &tokenizer_ptr);
     // printf("token_first is: %s\n", token_first);
+
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(token_first, PRI_DEFAULT, start_process, fn_copy);
-    // printf("Current thread tid is: %d\n", thread_current()->tid);
-    // printf("tid: %d\n", tid);
+    /*
+        //CODE TO TEST
+    printf("Current thread tid is: %d\n", thread_current()->tid);
+    printf("tid: %d\n", tid);
+    */
     free(name);
     if (tid == TID_ERROR)
         palloc_free_page(fn_copy);
@@ -82,20 +86,26 @@ start_process(void *file_name_) {
     success = load(file_name, &if_.eip, &if_.esp);
     // printf("success: %d\n", success);
 
+    // we need to check if the file was loaded successfully. If so we puss the arguments to the stack
     if (success) {
         args_to_stack(argCount, &args, &if_.esp);
     }
-    // printf("after args\n");
-    // hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+    /*
+        //CODE TO TEST
+     printf("after args\n");
+     hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+    */
 
-    // TODO CHANGE COMMENTS
+    //
     if (thread_current()->parent != NULL) {
-        // get this thread as a child
+        // get the data of this thread as a child from its wrapper
         struct child_wrapper *child = getChildData(thread_current()->tid, &thread_current()->parent->child_list);
-        // setting the load status
+        // setting the load status of the child
         child->loaded = success;
     }
-    // wake up my parent which wait me to load successfully
+
+    //  The parent thread waits until the child loads file successfully.
+    //  Afterwards the sema_up will inform the parent thread to continue
     sema_up(&thread_current()->sema_exec);
 
     /* If load failed, quit. */
@@ -117,6 +127,7 @@ start_process(void *file_name_) {
     NOT_REACHED();
 }
 
+/*Function which sets up stack of the user virtual address space*/
 void args_to_stack(int argCount, char **line, void **esp) {
 
     // A list to store the addresses of the arguments stored in the stack
@@ -133,7 +144,9 @@ void args_to_stack(int argCount, char **line, void **esp) {
         // copy value of arg into stack
         memcpy(*esp, line[i], strlen(line[i]) + 1);
     }
+    // TEST CODE
     // hex_dump(*esp, *esp, PHYS_BASE - *esp, true);
+
     // word align. Since the stack pointer is 4 byte aligned, we need to make sure
     // that the address of the first arg is also 4 byte aligned.
     *esp -= (uint32_t)*esp % 4;
@@ -145,6 +158,8 @@ void args_to_stack(int argCount, char **line, void **esp) {
         *esp -= 4;
         *(char **)*esp = args[i];
     }
+
+    // TEST CODE
     // hex_dump(*esp, *esp, PHYS_BASE - *esp, true);
 
     // push address of first arg
@@ -159,6 +174,7 @@ void args_to_stack(int argCount, char **line, void **esp) {
     *esp -= 4;
     *(int *)*esp = 0;
 }
+
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -168,7 +184,9 @@ void args_to_stack(int argCount, char **line, void **esp) {
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
+
 /*
+INITIAL TEST CODE
 int process_wait(tid_t child_tid UNUSED) {
     for (int i = 0; i < 500000000; i++) {
     }
@@ -177,31 +195,39 @@ int process_wait(tid_t child_tid UNUSED) {
 */
 
 int process_wait(tid_t tid) {
+
+    // Get the data of the child with the given TID
     struct child_wrapper *childData = getChildData(tid, &thread_current()->child_list);
 
-    // we cannot call wait on the same thread more than once
+    // We cannot call wait on the same thread more than once
+    // We also dont need to do anything if a thread with the required id doesnt exist
     if (childData != NULL && !childData->called_before) {
         childData->called_before = true;
 
-        // the current thread needs to wait till this child completes
+        // TEST CODE
         // printf("Waiting\n");
         // printf("Child status: %d\n", childData->status);
+
+        // The current thread needs to wait till this child completes
+        // After the child thread exits it will call sema_up from the process_exit() function.
+        // Afterwards the current thread can continue
         if (childData->status == THREAD_ALIVE) {
             // printf("Waiting for child to complete\n");
             sema_down(&(childData->child_thread->sema_wait));
         }
         // printf("Done waiting\n");
+
         // after the current thread is done waiting
         return childData->exit_status;
     }
     return -1;
 }
 
-/* Free the current process's resources. */
 void process_exit(void) {
     struct thread *cur = thread_current();
     uint32_t *pd;
     // printf("current thread tid: %d\n", cur->tid);
+
     // If current thread has a parent we need to set an exit status
     if (cur->parent != NULL) {
         struct child_wrapper *c = getChildData(cur->tid, &cur->parent->child_list);
@@ -214,14 +240,15 @@ void process_exit(void) {
 
     // Free all the child threads.
     // Since this process exits the child processes are no longer required
+    // Iterate through the list and free the memory of the child threads
     struct list *child_list = &cur->child_list;
     struct list_elem *e = list_begin(child_list);
     while (e != list_end(child_list)) {
-        struct list_elem *next = list_next(e);
+        struct list_elem *next_elem = list_next(e);
         struct child_wrapper *c = list_entry(e, struct child_wrapper, child_elem);
         list_remove(e);
         free(c);
-        e = next;
+        e = next_elem;
     }
 
     // awake parent
@@ -230,9 +257,10 @@ void process_exit(void) {
 
     cur->parent = NULL;
 
+    // By closing we allow other threads to access the executable file in this process
     file_close(cur->executable);
 
-    // free all files in current thread
+    // Close all files in the current thread's file list
     struct list *fd_list = &cur->fd_list;
     struct list_elem *el;
     while (!list_empty(fd_list)) {
@@ -362,6 +390,8 @@ bool load(const char *file_name, void (**eip)(void), void **esp) {
 
     /* Open executable file. */
     file = filesys_open(file_name);
+
+    // If file is not existing we cannot continue
     if (file == NULL) {
         printf("load: %s: open failed\n", file_name);
         goto done;
@@ -557,6 +587,8 @@ setup_stack(void **esp) {
     kpage = palloc_get_page(PAL_USER | PAL_ZERO);
     if (kpage != NULL) {
         success = install_page(((uint8_t *)PHYS_BASE) - PGSIZE, kpage, true);
+
+        // Stack pointer is brought down initially
         if (success)
             *esp = PHYS_BASE - 12;
         else

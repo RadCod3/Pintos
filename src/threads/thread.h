@@ -14,7 +14,7 @@ enum thread_status {
     THREAD_DYING    /* About to be destroyed. */
 };
 
-// For child_status
+// Constant values for keeping track of the childs current and exit status
 #define THREAD_ALIVE 2
 #define THREAD_KILLED 0
 #define THREAD_EXITED 1
@@ -122,23 +122,23 @@ struct thread {
     unsigned magic; /* Detects stack overflow. */
 };
 
-/*
-wrapper class for a child thread to access and store important data easily
- */
-struct child_wrapper {
-    struct list_elem child_elem; /*list elem used to add in child_list */
-    struct thread *child_thread; /*pointer to the real child thread*/
-    tid_t process_id;            /*Parent id of child. Easier than getting child->child_thread->parent->tid*/
-    bool called_before;          /*to check if wait() is called before?*/
-    int status;                  /*Alive Killed or EXITED*/
-    int exit_status;             /*To check how the process completed*/
-    bool loaded;                 /*To check if the process loaded successfully*/
-};
-
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+/*
+wrapper class for a child thread to access and store important data easily
+ */
+struct child_wrapper {
+    struct list_elem child_elem; /*element that represents the wrapper object in the child_list */
+    struct thread *child_thread; /*A pointer to the actual child thread*/
+    tid_t process_id;            /*Parent id of child. Easier than getting child->child_thread->parent->tid*/
+    bool called_before;          /*Keep tabs on whether wait was called before*/
+    int status;                  /*Alive Killed or EXITED*/
+    int exit_status;             /*To check how the process completed*/
+    bool loaded;                 /*To check if the process loaded successfully*/
+};
 
 void thread_init(void);
 void thread_start(void);

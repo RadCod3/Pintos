@@ -439,22 +439,24 @@ init_thread(struct thread *t, const char *name, int priority) {
     ASSERT(name != NULL);
 
     memset(t, 0, sizeof *t);
-    t->status = THREAD_BLOCKED;
-    strlcpy(t->name, name, sizeof t->name);
-    t->stack = (uint8_t *)t + PGSIZE;
-    t->priority = priority;
+
+    // initialize semaphore for waiting. Initialized to zero
+    sema_init(&t->sema_wait, 0);
+    sema_init(&t->sema_exec, 0);
 
     // initialize the list of file descriptors, and the count. Count 1 and 0 are reserved for stdout and stdin
     list_init(&t->fd_list);
     t->fd_count = 1;
     t->executable = NULL;
 
+    t->status = THREAD_BLOCKED;
+    strlcpy(t->name, name, sizeof t->name);
+    t->stack = (uint8_t *)t + PGSIZE;
+    t->priority = priority;
+
     // initialize list of child threads
     list_init(&t->child_list);
 
-    // initialize semaphore for waiting. Initialized to zero
-    sema_init(&t->sema_wait, 0);
-    sema_init(&t->sema_exec, 0);
     t->parent = NULL;
     t->magic = THREAD_MAGIC;
 

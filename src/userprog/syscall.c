@@ -20,11 +20,16 @@ static bool put_user(uint8_t *udst, uint8_t byte);
 struct file_descriptor *getfdObject(int fd);
 struct child_wrapper *getChildData(tid_t tid, struct list *thread_list);
 
+/*Initializes the file system lock and registers the system call handler. */
 void syscall_init(void) {
     lock_init(&f_lock);
     intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
+/* The system call handler that calls various system calls based on the
+system call number. Every time we read from user virtual address space, we
+check if the address is valid. If not, we exit the process.
+*/
 static void
 syscall_handler(struct intr_frame *f UNUSED) {
 
@@ -161,34 +166,35 @@ syscall_handler(struct intr_frame *f UNUSED) {
     }
 }
 
-/*function read memory from user virtual address space*/
+/* Function that that reads memory from user virtual address space if the
+address is valid. If not, it returns false. */
 static int read_memory(void *addr, void *buffer, unsigned size) {
-    unsigned i;
-    int result = 1;
-    for (i = 0; i < size; i++) {
-        if (!is_user_vaddr(addr + i)) {
-            result = 0;
-            break;
-        }
+    unsigned i = 0;
+    while (i < size && is_user_vaddr(addr + i)) {
         int byte = get_user(addr + i);
         if (byte == -1) {
-            result = 0;
             break;
         }
         *(char *)(buffer + i) = (uint8_t)byte;
+        i++;
     }
-    return result;
+    // If i is not equal to size, it means that we have reached an
+    // invalid address, or get_user returned -1.
+    return i == size;
 }
 
-// Terminates Pintos by calling shutdown_power_off() (declared in devices/shutdown.h).
-// This should be seldom used, because you lose some information about possible deadlock situations, etc.
+/* Terminates Pintos by calling shutdown_power_off() (declared in devices/shutdown.h).
+ This should be seldom used, because you lose some information about possible deadlock
+ situations, etc.
+ */
 void halt(void) {
     shutdown_power_off();
 }
 
-// Terminates the current user program, returning status to the kernel.
-// If the process's parent waits for it (see below), this is the status that will be returned.
-// Conventionally, a status of 0 indicates success and nonzero values indicate errors.
+/* Terminates the current user program, returning status to the kernel.
+If the process's parent waits for it (see below), this is the status that will be returned.
+Conventionally, a status of 0 indicates success and nonzero values indicate errors.
+*/
 void exit(int status) {
     struct thread *cur = thread_current();
     // printf("SYS_EXIT was called\n");
@@ -197,7 +203,7 @@ void exit(int status) {
     struct child_wrapper *c = getChildData(cur->tid, &cur->parent->child_list);
 
     c->exit_status = status;
-    // mark current status of the thread.Thread maybe exitting due to completion or being killed.
+    // Mark current status of the thread.Thread maybe exiting due to completion or being killed.
     if (status == -1) {
         c->status = THREAD_KILLED;
     } else {
@@ -216,17 +222,17 @@ You must use appropriate synchronization to ensure this.
 pid_t exec(const char *cmd_line) {
     struct thread *parent = thread_current();
     tid_t pid = -1;
-    // create child process to execute cmd
+    // Run the executable using a new thread
     // printf("came here\n");
     pid = process_execute(cmd_line);
 
-    // get the created child
+    // Get the child_wrapper of above created child thread
     struct child_wrapper *childWrap = getChildData(pid, &parent->child_list);
-    // wait this child until load
+    // Make the child thread wait until it loads the executable.
     sema_down(&childWrap->child_thread->sema_exec);
-    // after wake up check if child load successfully
+
     if (!childWrap->loaded) {
-        // failed to load
+        // Loading failed
         return -1;
     }
     return pid;
@@ -238,7 +244,7 @@ The child can exit before the parent performs wait
 A process can only perform wait for its children
 wait() can be called twice for the same process but second call must fail
 Nested waits are possible
-pintos shouldnt terminate until initial process exits
+pintos shouldn't terminate until initial process exits
 */
 int wait(pid_t pid) {
     return process_wait(pid);
@@ -253,7 +259,7 @@ Each process has an independent set of file descriptors. File descriptors are no
 When a single file is opened more than once, whether by a single process or different processes, each open returns a new file descriptor.
 Different file descriptors for a single file are closed independently in separate calls to close and they do not share a file position*/
 int open(const char *file) {
-    /* when a file is opened, it is added to the file descriptor list of the current thread
+    /* When a file is opened, it is added to the file descriptor list of the current thread
     and the fd count is incremented by 1. This function then returns the fd count or -1 if the
     file could not be opened.
     */
@@ -261,10 +267,12 @@ int open(const char *file) {
         return -1;
     }
 
+    // filesys_open() is not thread safe. So we need to acquire the lock before calling it.
     lock_acquire(&f_lock);
     struct file *fileOpened = filesys_open(file);
-    struct thread *cur = thread_current();
     lock_release(&f_lock);
+
+    struct thread *cur = thread_current();
     // printf("Came Here");
     // printf("%d", fileOpened);
     if (fileOpened != NULL) {
@@ -278,7 +286,7 @@ int open(const char *file) {
     return -1;
 }
 
-/*Creates a new file called file initially initial_size bytes in size. Returns true if successful, false otherwise */
+/*Creates a new file with an initial_size bytes in size. Returns true if successful, false otherwise */
 bool create(const char *file, unsigned initial_size) {
     if (!file || !is_user_vaddr(file) || get_user(file) == -1) {
         exit(-1);
@@ -286,8 +294,8 @@ bool create(const char *file, unsigned initial_size) {
 
     lock_acquire(&f_lock);
     bool result = filesys_create(file, initial_size);
-
     lock_release(&f_lock);
+
     return result;
 }
 
@@ -298,7 +306,7 @@ bool remove(const char *file) {
     return result;
 }
 
-/*Writes size bytes from buffer to the open file fd. Returns the number of bytes actually written, which may be less than size if some bytes could not be written.
+/* Writes size bytes from buffer to the open file fd. Returns the number of bytes actually written, which may be less than size if some bytes could not be written.
 Writing past end-of-file would normally extend the file, but file growth is not implemented by the basic file system.
 The expected behavior is to write as many bytes as possible up to end-of-file and return the actual number written, or 0 if no bytes could be written at all.
 
@@ -322,21 +330,20 @@ int write(int fd, const void *buffer, unsigned size) {
         return size;
     }
 
-    // acquire lockto access the file system
-    lock_acquire(&f_lock);
-
     // actual_byte_count stores the actual number of bytes written to the file
     // This may differ from the given size because space for a single file is limited and cannot grow.
 
     struct file_descriptor *fd_obj = getfdObject(fd);
 
     if (fd_obj == NULL) {
-        lock_release(&f_lock);
         return -1;
     }
-    struct file *fd_file = fd_obj->file;
-    int actual_byte_count = (int)file_write(fd_file, buffer, size);
 
+    struct file *fd_file = fd_obj->file;
+
+    // acquire lockto access the file system
+    lock_acquire(&f_lock);
+    int actual_byte_count = (int)file_write(fd_file, buffer, size);
     lock_release(&f_lock);
     return actual_byte_count;
 }
@@ -348,10 +355,12 @@ unsigned tell(int fd) {
     if (fd_obj == NULL) {
         return -1;
     }
-    lock_acquire(&f_lock);
     struct file *fd_file = fd_obj->file;
+
+    lock_acquire(&f_lock);
     unsigned position = file_tell(fd_file);
     lock_release(&f_lock);
+
     return position;
 }
 
@@ -362,8 +371,9 @@ void seek(int fd, unsigned position) {
     if (fd_obj == NULL) {
         return;
     }
-    lock_acquire(&f_lock);
     struct file *fd_file = fd_obj->file;
+
+    lock_acquire(&f_lock);
     file_seek(fd_file, position);
     lock_release(&f_lock);
 }
@@ -373,7 +383,7 @@ int read(int fd, void *buffer, unsigned size) {
 
     if (fd < 0) {
         exit(-1);
-        return -1;
+        // return -1;
     }
 
     if (fd == STDIN_FILENO) {
@@ -387,13 +397,13 @@ int read(int fd, void *buffer, unsigned size) {
 
     struct file_descriptor *fd_obj = getfdObject(fd);
     // if invalid address or fd is not found
-    if (fd_obj == NULL || buffer == NULL || !is_user_vaddr(buffer) || get_user(buffer) == -1 || !is_user_vaddr(buffer + size) || get_user(buffer + size) == -1) {
+    if (fd_obj == NULL || buffer == NULL || get_user(buffer) == -1 || !is_user_vaddr(buffer + size) || get_user(buffer + size) == -1) {
 
         exit(-1);
-        return -1;
+        // return -1;
     }
-    lock_acquire(&f_lock);
     struct file *fd_file = fd_obj->file;
+    lock_acquire(&f_lock);
     int actual_byte_count = (int)file_read(fd_file, buffer, size);
     lock_release(&f_lock);
     return actual_byte_count;
@@ -401,19 +411,22 @@ int read(int fd, void *buffer, unsigned size) {
 
 /* Closes file descriptor fd. */
 void close(int fd) {
-    lock_acquire(&f_lock);
     struct file_descriptor *fd_obj = getfdObject(fd);
+
     if (fd_obj == NULL) {
-        lock_release(&f_lock);
         return;
     }
+
     struct file *fd_file = fd_obj->file;
+
+    lock_acquire(&f_lock);
     file_close(fd_file);
+    lock_release(&f_lock);
+
     // removing the file descriptor object from the open files list
     list_remove(&fd_obj->elem);
     // freeing the memory allocated to the file descriptor object
     free(fd_obj);
-    lock_release(&f_lock);
 }
 /* Returns the size, in bytes, of the file open as fd. */
 int filesize(int fd) {
@@ -449,25 +462,29 @@ put_user(uint8_t *udst, uint8_t byte) {
 }
 // search a given list and find a thread with given tid
 struct child_wrapper *getChildData(tid_t tid, struct list *thread_list) {
-    struct list_elem *e;
-    for (e = list_begin(thread_list); e != list_end(thread_list); e = list_next(e)) {
+    struct list_elem *e = list_begin(thread_list);
+    while (e != list_end(thread_list)) {
         struct child_wrapper *c = list_entry(e, struct child_wrapper, child_elem);
         if (c->process_id == tid) {
             return c;
         }
+        e = list_next(e);
     }
-    // exit(-1);
+
     return NULL;
 }
 // get the file_descriptor from fd_list in current thread.
 struct file_descriptor *getfdObject(int fd) {
-    struct list_elem *element;
     struct list *fd_list = &thread_current()->fd_list;
-    for (element = list_begin(fd_list); element != list_end(fd_list); element = list_next(element)) {
+    struct list_elem *element = list_begin(fd_list);
+
+    while (element != list_end(fd_list)) {
         struct file_descriptor *fd_obj = list_entry(element, struct file_descriptor, elem);
         if (fd_obj->fd == fd) {
             return fd_obj;
         }
+        element = list_next(element);
     }
+
     return NULL;
 }
