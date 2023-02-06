@@ -85,7 +85,7 @@ the stack of the user program. It is implementes as follows;
 `struct' member, global or static variable, `typedef', or
 > > enumeration. Identify the purpose of each in 25 words or less.
 
-1.        Altered struct thread.
+1.                            Altered struct thread.
 
     - fd_list and fd_count were newly added to track files belonging to the thread.
     - a pointer to the parent of the thread is added to easily access the parent of the thread
@@ -126,7 +126,7 @@ the stack of the user program. It is implementes as follows;
     unsigned magic; /_ Detects stack overflow. \*/
     };
 
-2.        Created a new child_wrapper struct for child threads to maintain data that is needed.
+2.                            Created a new child_wrapper struct for child threads to maintain data that is needed.
 
     struct child*wrapper {
     struct list_elem child_elem; /\_list elem used to add in child_list */
@@ -138,7 +138,7 @@ the stack of the user program. It is implementes as follows;
     bool loaded; /*To check if the process loaded successfully\*/
     };
 
-3.        Created a new struct for handling files
+3.                            Created a new struct for handling files
 
     /_ Object that stores the file descriptor and the file pointer. We use this to
     store the file descriptor and the file pointer in a list. _/
@@ -156,25 +156,27 @@ the stack of the user program. It is implementes as follows;
     #define THREAD_EXITED 1
     #define INITIAL_EXIT_STATUS -500
 
-5.        Implemented a file system lock to prevent multiple threads accessing the file system at once.
+5.                            Implemented a file system lock to prevent multiple threads accessing the file system at once.
 
     struct lock f_lock;
 
 > > B2: Describe how file descriptors are associated with open files.
 > > Are file descriptors unique within the entire OS or just within a
 > > single process?
-> > Each process maintains a list of open files and each file is assigned
-> > a unique file descriptor. Hence the file descriptors are unique within
-> > the process not the entire OS.
+
+Each process maintains a list of open files and each file is assigned
+a unique file descriptor. Hence the file descriptors are unique within
+the process not the entire OS.
 
 ---- ALGORITHMS ----
 
 > > B3: Describe your code for reading and writing user data from the
 > > kernel.
-> > We first check if the user virtual address is valid. We do that by checking if
-> > the address is below PHYS_BASE. Then by using the get_user function we read
-> > the argument from the user virtual address.
-> > read:
+
+We first check if the user virtual address is valid. We do that by checking if
+the address is below PHYS_BASE. Then by using the get_user function we read
+the argument from the user virtual address.
+read:
 
     - if fd is 0 we read from the keyboard using input_getc(), else it is a file.
     - Since the open files are stored in a list, we get the fd_object from the list
@@ -242,11 +244,12 @@ Example:
 > > fails, so it cannot return before the new executable has completed
 > > loading. How does your code ensure this? How is the load
 > > success/failure status passed back to the thread that calls "exec"?
-> > By using the sema_exec semaphore we ensure that the new executable has
-> > completed loading before returning. After loading the executable we
-> > sema_up the sema_exec semaphore in start_process(). Then the child continues
-> > execution. If the load fails, exec will return -1. If it succeeds, it will
-> > return the tid of the child thread.
+
+By using the sema_exec semaphore we ensure that the new executable has
+completed loading before returning. After loading the executable we
+sema_up the sema_exec semaphore in start_process(). Then the child continues
+execution. If the load fails, exec will return -1. If it succeeds, it will
+return the tid of the child thread.
 
 > > B8: Consider parent process P with child process C. How do you
 > > ensure proper synchronization and avoid race conditions when P
@@ -258,36 +261,41 @@ Example:
 When wait(C) is called, process_wait(C) is called within the previous function.
 
 - When wait(C) is called before C exits;
-  First we check whether C is actually a child of P. If it is not so we rerturn -1.
+  First we check whether C is actually a child of P. If it is not so we return -1.
   If C is a child of P and the status of C is still alive we wait till C completes by using sema_down on C. Once C completes we notify P by calling sema_up on C.
 
 - When wait(C) is called after C exits ;
-  In this case we dont need to wait on C as it has already exited. We simply return the exit status of C.
+  In this case we don't need to wait on C as it has already exited. We simply return the exit status of C.
 
--     How to ensure all resources are freed;
+- How to ensure all resources are freed, when P terminates without waiting, before C exits;
+  P will clear it's resources and C will become an orphan process and will clear it's resources when it exits.
+
+- How to ensure all resources are freed, when P terminates without waiting, after C exits;
+  Then there is no issue as C has already exited. P will proceed to clear it's resources and exit.
 
 ---- RATIONALE ----
 
 > > B9: Why did you choose to implement access to user memory from the
 > > kernel in the way that you did?
-> > We used the method where one checks whether the user virtual address
-> > was below PHYS_BASE, as it was the more faster method which is also
-> > used in real kernels like Linux.
+
+We used the method where one checks whether the user virtual address
+was below PHYS_BASE, as it was the more faster method which is also
+used in real kernels like Linux.
 
 > > B10: What advantages or disadvantages can you see to your design
 > > for file descriptors?
-> > Advantages:
 
-    - It is very simple. We assign a unique file descriptor to each
-      file and store the file in a list. We can get the file by
-      passing the file descriptor as an argument to get_fd_object().
+Advantages: - It is very simple. We assign a unique file descriptor to each
+file and store the file in a list. We can get the file by
+passing the file descriptor as an argument to get_fd_object().
 
 Disadvantages: - It is not very efficient. We have to traverse the list to get the
 fd_object. Since it is a linked list that requires O(n) time.
 
 > > B11: The default tid_t to pid_t mapping is the identity mapping.
 > > If you changed it, what advantages are there to your approach?
-> > We made no changes to the default tid_t to pid_t mapping.
+
+We made no changes to the default tid_t to pid_t mapping.
 
     		   SURVEY QUESTIONS
     		   ================
