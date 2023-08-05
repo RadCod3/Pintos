@@ -1,3 +1,5 @@
+Additions to Pintos I authored with [@inuka-00](https://github.com/inuka-00) for our Operating Systems Module at University.
+
 # Pintos
 Labs for undergraduate OS class (600.318) at Johns Hopkins. [Pintos](http://pintos-os.org) 
 is a teaching operating system for x86, challenging but not overwhelming, small
